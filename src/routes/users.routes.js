@@ -1,7 +1,6 @@
 import { Router } from "express";
 
 import verifyFirebaseToken from "../middleware/verifyFirebaseToken.js";
-
 import { getMyProfile, putUserDb, updateMyLanguage} from "../controllers/users.controller.js";
 
 const router = Router();

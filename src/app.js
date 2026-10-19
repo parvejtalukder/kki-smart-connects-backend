@@ -1,7 +1,9 @@
 import express from "express";
 import cors from "cors";
 
+import translateRoutes from "./routes/translate.routes.js";
 import usersRoutes from "./routes/users.routes.js";
+import messagesRouter from "./routes/messages.routes.js";
 
 const app = express();
 
@@ -19,6 +21,8 @@ app.get("/api/health", (req, res) => {
 });
 
 app.use("/api/users", usersRoutes);
+app.use("/api/messages", messagesRouter);
+app.use("/api/translate", translateRoutes);
 
 app.use((req, res) => {
   res.status(404).json({
