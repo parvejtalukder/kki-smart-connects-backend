@@ -1,6 +1,7 @@
 import { ObjectId } from "mongodb";
 import { getDB } from "../config/mongodb.js";
 import { translateText } from "../services/message.services.js";
+import { io, getReceiverSocketId } from "../config/socket.js";
 
 const users = () => getDB().collection("users");
 const messages = () => getDB().collection("messages");
@@ -96,6 +97,23 @@ export const getSideConversations = async (req, res, next) => {
                 "$senderId",
               ],
             },
+            lastMessage: {
+              $cond: [
+                { $eq: ["$senderId", currentUser._id] },
+                {
+                  $ifNull: [
+                    "$textMessage.originalText",
+                    null,
+                  ],
+                },
+                {
+                  $ifNull: [
+                    "$textMessage.translatedText",
+                    null,
+                  ],
+                },
+              ],
+            },
           },
         },
         {
@@ -109,8 +127,16 @@ export const getSideConversations = async (req, res, next) => {
             _id: "$otherUserId",
             lastMessageAt: { $first: "$createdAt" },
             lastMessageId: { $first: "$_id" },
-            lastMessage: { $first: "$text" },
+            lastMessage: { $first: "$lastMessage" },
             lastMessageSenderId: { $first: "$senderId" },
+            lastMessageIsImage: {
+              $first: {
+                $and: [
+                  { $eq: [{ $ifNull: ["$textMessage", null] }, null] },
+                  { $ne: [{ $ifNull: ["$imageMessage", null] }, null] },
+                ],
+              },
+            },
           },
         },
         {
@@ -131,7 +157,14 @@ export const getSideConversations = async (req, res, next) => {
             photoURL: "$user.photoURL",
             lastMessageAt: 1,
             lastMessageId: 1,
-            lastMessage: 1,
+            lastMessage: {
+              $cond: [
+                "$lastMessageIsImage",
+                "[Image]",
+                "$lastMessage",
+              ],
+            },
+            lastMessageIsImage: 1,
             lastMessageSenderId: 1,
           },
         },
@@ -149,7 +182,6 @@ export const getSideConversations = async (req, res, next) => {
       message: "Conversations retrieved successfully.",
       conversations,
     });
-
   } catch (error) {
     next(error);
   }
@@ -157,12 +189,20 @@ export const getSideConversations = async (req, res, next) => {
 
 export const getMessages = async (req, res, next) => {
   try {
-  
     const { id: userToChatId } = req.params;
+    const firebaseUid = req.user?.uid;
+
     if (!firebaseUid) {
       return res.status(401).json({
         success: false,
         message: "Authentication required.",
+      });
+    }
+
+    if (!ObjectId.isValid(userToChatId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid chat user ID.",
       });
     }
 
@@ -175,24 +215,44 @@ export const getMessages = async (req, res, next) => {
       });
     }
 
-    const myId = currentUser._id;
-    const allMessages = await messages().find({
-      $or: [
-        { senderId: myId, receiverId: userToChatId },
-        { senderId: userToChatId, receiverId: myId },
-      ]
-    }).sort({ createdAt: 1 }).toArray();
+    const chatUserId = new ObjectId(userToChatId);
+
+    const chatUser = await users().findOne({
+      _id: chatUserId,
+    });
+
+    if (!chatUser) {
+      return res.status(404).json({
+        success: false,
+        message: "Chat user not found.",
+      });
+    }
+
+    const allMessages = await messages()
+      .find({
+        $or: [
+          {
+            senderId: currentUser._id,
+            receiverId: chatUserId,
+          },
+          {
+            senderId: chatUserId,
+            receiverId: currentUser._id,
+          },
+        ],
+      })
+      .sort({ createdAt: 1, _id: 1 })
+      .toArray();
 
     return res.status(200).json({
       success: true,
       message: "Messages retrieved successfully.",
       messages: allMessages,
     });
-
   } catch (error) {
-    next(error)
+    next(error);
   }
-}
+};
 
 export const sendMessage = async (req, res, next) => {
   try {
@@ -283,6 +343,10 @@ export const sendMessage = async (req, res, next) => {
     };
 
     const result = await messages().insertOne(newMessage);
+    // const receiverSocketId = getReceiverSocketId(receiverId);
+    // if (receiverSocketId) {
+    
+    // }
 
     return res.status(201).json({
       success: true,
