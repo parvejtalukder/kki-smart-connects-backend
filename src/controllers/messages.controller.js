@@ -1,18 +1,10 @@
 import { ObjectId } from "mongodb";
 import { getDB } from "../config/mongodb.js";
 import { translateText } from "../services/message.services.js";
-import { io, getReceiverSocketId } from "../config/socket.js";
+import { io } from "../config/socket.js";
 
 const users = () => getDB().collection("users");
 const messages = () => getDB().collection("messages");
-
-export const createMessage = async (req, res, next) => {
-    try {
-        
-    } catch (error) { 
-        
-    }
-}
 
 export const getUsers = async (req, res, next) => {
   try {
@@ -343,10 +335,15 @@ export const sendMessage = async (req, res, next) => {
     };
 
     const result = await messages().insertOne(newMessage);
-    // const receiverSocketId = getReceiverSocketId(receiverId);
-    // if (receiverSocketId) {
-    
-    // }
+    const savedMessage = {
+      ...newMessage,
+      _id: result.insertedId.toString(),
+      senderId: String(newMessage.senderId),
+      receiverId: String(newMessage.receiverId),
+    }
+
+    io.to([`user:${savedMessage.receiverId}`, `user:${savedMessage.senderId}`,]
+    ).emit("newMessage", savedMessage);
 
     return res.status(201).json({
       success: true,
@@ -356,6 +353,7 @@ export const sendMessage = async (req, res, next) => {
         ...newMessage,
       },
     });
+    
   } catch (error) {
     next(error);
   }
