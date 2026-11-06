@@ -12,7 +12,8 @@ const verifyFirebaseToken = async (req, res, next) => {
       const token = authorization.slice(7);
       req.user = await adminAuth.verifyIdToken(token);
       next();
-    } catch {
+    } catch (error) {
+      console.error("Firebase token verification failed:", error.code || error.message);
       return res.status(401).json({
         success: false,
         message: "Invalid or expired token.",

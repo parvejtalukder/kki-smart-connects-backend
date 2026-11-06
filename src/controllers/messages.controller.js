@@ -6,6 +6,68 @@ import { io } from "../config/socket.js";
 const users = () => getDB().collection("users");
 const messages = () => getDB().collection("messages");
 
+const translateAndPatchMessage = async ( {messageId, text, senderId, receiverLanguage, receiverId, senderLanguage} ) => {
+  try{
+    
+    const translatedText = await translateText(text, senderLanguage, receiverLanguage);
+    
+    const result = await messages().updateOne({
+      _id: messageId,
+      "textMessage.translationStatus": "pending",
+    }, {
+      $set: {
+        "textMessage.translatedText": translatedText,
+        "textMessage.translationStatus": "done",
+        updatedAt: new Date()
+      },
+    });
+
+    if (result.matchedCount === 0) return;
+
+    io.to([
+      `user:${receiverId}`,
+      `user:${senderId}`,
+    ]).emit("messageTranslated", {
+      _id: messageId.toString(),
+      translatedText
+    })
+
+  } catch (error) {
+    console.error("Background translation failed:", error.message);
+
+    try {
+      const result = await messages().updateOne({
+        _id: messageId,
+        "textMessage.translationStatus": "pending",
+      },{
+        $set: {
+          "textMessage.translationStatus": "failed",
+          updatedAt: new Date(),
+        }
+      })
+
+      if (result.matchedCount === 0) return;
+
+      io.to([
+        `user:${receiverId}`,
+        `user:${senderId}`,
+      ]).emit("messageTranslationFailed", {
+        _id: messageId.toString()
+      });
+
+    } catch(error) {
+
+      console.error(
+        "Failed to update translation status",
+        error.message
+      )
+
+    }
+
+  }
+
+};
+
 export const getUsers = async (req, res, next) => {
   try {
 
@@ -101,7 +163,7 @@ export const getSideConversations = async (req, res, next) => {
                 {
                   $ifNull: [
                     "$textMessage.translatedText",
-                    null,
+                    "$textMessage.originalText"
                   ],
                 },
               ],
@@ -297,27 +359,58 @@ export const sendMessage = async (req, res, next) => {
     const senderId = currentUser._id;
     const receiverIdObject = receiverUser._id;
 
+    // let textMessage = null;
+    // let imageMessage = null;
+
+    // if (typeof text === "string" && text.trim()) {
+    //   const senderLanguage = currentUser.language || "en";
+    //   const receiverLanguage = receiverUser.language || "en";
+
+    //   const translatedText = await translateText(
+    //     text.trim(),
+    //     senderLanguage,
+    //     receiverLanguage
+    //   );
+
+    //   textMessage = {
+    //     originalText: text.trim(),
+    //     translatedText,
+    //     senderLanguage,
+    //     receiverLanguage,
+    //   };
+    // } else if (image) {
+    //   imageMessage = image;
+    // } else {
+    //   return res.status(400).json({
+    //     success: false,
+    //     message: "Text or image is required.",
+    //   });
+    // }
+
     let textMessage = null;
     let imageMessage = null;
-
+    
     if (typeof text === "string" && text.trim()) {
       const senderLanguage = currentUser.language || "en";
       const receiverLanguage = receiverUser.language || "en";
-
-      const translatedText = await translateText(
-        text.trim(),
-        senderLanguage,
-        receiverLanguage
-      );
-
+    
+      const originalText = text.trim();
+    
+      const sameLanguage =
+        senderLanguage.toLowerCase() ===
+        receiverLanguage.toLowerCase();
+    
       textMessage = {
-        originalText: text.trim(),
-        translatedText,
+        originalText,
+        translatedText: sameLanguage ? originalText : null,
         senderLanguage,
         receiverLanguage,
+        translationStatus: sameLanguage ? "done" : "pending",
       };
+    
     } else if (image) {
       imageMessage = image;
+    
     } else {
       return res.status(400).json({
         success: false,
@@ -344,6 +437,18 @@ export const sendMessage = async (req, res, next) => {
 
     io.to([`user:${savedMessage.receiverId}`, `user:${savedMessage.senderId}`,]
     ).emit("newMessage", savedMessage);
+
+    
+    if (textMessage?.translationStatus ===     "pending") {
+      void translateAndPatchMessage({
+        messageId: result.insertedId,
+        text: textMessage.originalText,
+        senderLanguage: textMessage.    senderLanguage,
+        receiverLanguage: textMessage.    receiverLanguage,
+        senderId: savedMessage.senderId,
+        receiverId: savedMessage.receiverId,
+      });
+    }
 
     return res.status(201).json({
       success: true,

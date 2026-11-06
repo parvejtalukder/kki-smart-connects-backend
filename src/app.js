@@ -4,6 +4,7 @@ import cors from "cors";
 import translateRoutes from "./routes/translate.routes.js";
 import usersRoutes from "./routes/users.routes.js";
 import messagesRouter from "./routes/messages.routes.js";
+import uploadsRoutes from "./routes/uploads.routes.js";
 
 const app = express();
 
@@ -21,6 +22,7 @@ app.get("/api/health", (req, res) => {
 });
 
 app.use("/api/users", usersRoutes);
+app.use("/api/uploads", uploadsRoutes);
 app.use("/api/messages", messagesRouter);
 app.use("/api/translate", translateRoutes);
 
